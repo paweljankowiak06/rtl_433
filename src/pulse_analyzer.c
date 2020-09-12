@@ -144,6 +144,17 @@ static void histogram_fuse_bins(histogram_t *hist, float tolerance)
     }
 }
 
+/// Find bin index
+static int histogram_find_bin_index(histogram_t const *hist, int width)
+{
+    for (unsigned n = 0; n < hist->bins_count; ++n) {
+        if (hist->bins[n].min <= width && width <= hist->bins[n].max) {
+            return n;
+        }
+    }
+    return -1;
+}
+
 /// Print a histogram
 static void histogram_print(histogram_t const *hist, uint32_t samp_rate)
 {
@@ -155,6 +166,32 @@ static void histogram_print(histogram_t const *hist, uint32_t samp_rate)
                 hist->bins[n].max * 1e6 / samp_rate,
                 hist->bins[n].mean);
     }
+}
+
+#define HEXSTR_BUILDER_SIZE 2048
+
+/// Hex string builder
+typedef struct {
+    char p[HEXSTR_BUILDER_SIZE];
+    unsigned idx;
+} hexstr_t;
+
+static void hexstr_push_nibble(hexstr_t *h, int v)
+{
+    if (h->idx < HEXSTR_BUILDER_SIZE)
+        h->idx += snprintf(h->p + h->idx, HEXSTR_BUILDER_SIZE - h->idx, "%X", v & 0xf);
+}
+
+static void hexstr_push_byte(hexstr_t *h, int v)
+{
+    if (h->idx < HEXSTR_BUILDER_SIZE)
+        h->idx += snprintf(h->p + h->idx, HEXSTR_BUILDER_SIZE - h->idx, "%02X", v & 0xff);
+}
+
+static void hexstr_push_word(hexstr_t *h, int v)
+{
+    if (h->idx < HEXSTR_BUILDER_SIZE)
+        h->idx += snprintf(h->p + h->idx, HEXSTR_BUILDER_SIZE - h->idx, "%04X", v & 0xffff);
 }
 
 #define TOLERANCE (0.2f) // 20% tolerance should still discern between the pulse widths: 0.33, 0.66, 1.0
@@ -177,16 +214,20 @@ void pulse_analyzer(pulse_data_t *data, int package_type)
     histogram_t hist_pulses  = {0};
     histogram_t hist_gaps    = {0};
     histogram_t hist_periods = {0};
+    histogram_t hist_timings = {0};
 
     // Generate statistics
     histogram_sum(&hist_pulses, data->pulse, data->num_pulses, TOLERANCE);
     histogram_sum(&hist_gaps, data->gap, data->num_pulses - 1, TOLERANCE);                      // Leave out last gap (end)
     histogram_sum(&hist_periods, pulse_periods.pulse, pulse_periods.num_pulses - 1, TOLERANCE); // Leave out last gap (end)
+    histogram_sum(&hist_timings, data->pulse, data->num_pulses, TOLERANCE);
+    histogram_sum(&hist_timings, data->gap, data->num_pulses - 1, TOLERANCE); // Leave out last gap (end)
 
     // Fuse overlapping bins
     histogram_fuse_bins(&hist_pulses, TOLERANCE);
     histogram_fuse_bins(&hist_gaps, TOLERANCE);
     histogram_fuse_bins(&hist_periods, TOLERANCE);
+    histogram_fuse_bins(&hist_timings, TOLERANCE);
 
     fprintf(stderr, "Analyzing pulses...\n");
     fprintf(stderr, "Total count: %4u,  width: %4.2f ms\t\t(%5i S)\n",
@@ -197,6 +238,8 @@ void pulse_analyzer(pulse_data_t *data, int package_type)
     histogram_print(&hist_gaps, data->sample_rate);
     fprintf(stderr, "Pulse period distribution:\n");
     histogram_print(&hist_periods, data->sample_rate);
+    fprintf(stderr, "Pulse timing distribution:\n");
+    histogram_print(&hist_timings, data->sample_rate);
     fprintf(stderr, "Level estimates [high, low]: %6i, %6i\n",
             data->ook_high_estimate, data->ook_low_estimate);
     fprintf(stderr, "RSSI: %.1f dB SNR: %.1f dB Noise: %.1f dB\n",
@@ -287,6 +330,53 @@ void pulse_analyzer(pulse_data_t *data, int package_type)
     }
     else {
         fprintf(stderr, "No clue...\n");
+    }
+
+    // Output RfRaw line (if possible)
+    if (hist_timings.bins_count <= 8) {
+        if (data->num_pulses < 236) {
+            hexstr_t hexstr = {0};
+            hexstr_push_byte(&hexstr, 0xaa);
+            hexstr_push_byte(&hexstr, 0xb1);
+            hexstr_push_byte(&hexstr, hist_timings.bins_count);
+            for (unsigned b = 0; b < hist_timings.bins_count; ++b) {
+                hexstr_push_word(&hexstr, hist_timings.bins[b].mean);
+            }
+            for (unsigned i = 0; i < data->num_pulses; ++i) {
+                int p = histogram_find_bin_index(&hist_timings, data->pulse[i]);
+                int g = histogram_find_bin_index(&hist_timings, data->gap[i]);
+                hexstr_push_nibble(&hexstr, p | 8);
+                hexstr_push_nibble(&hexstr, g);
+            }
+            hexstr_push_byte(&hexstr, 0x55);
+            fprintf(stderr, "RfRaw (rx) %s\n", hexstr.p);
+        }
+        else {
+            int limit_bin = MIN(3, hist_gaps.bins_count - 1);
+            int limit = hist_gaps.bins[limit_bin].min;
+            unsigned i = 0;
+            while (i < data->num_pulses) {
+                hexstr_t hexstr = {0};
+                hexstr_push_byte(&hexstr, 0xaa);
+                hexstr_push_byte(&hexstr, 0xb1);
+                hexstr_push_byte(&hexstr, hist_timings.bins_count);
+                for (unsigned b = 0; b < hist_timings.bins_count; ++b) {
+                    hexstr_push_word(&hexstr, hist_timings.bins[b].mean);
+                }
+                for (; i < data->num_pulses; ++i) {
+                    int p = histogram_find_bin_index(&hist_timings, data->pulse[i]);
+                    int g = histogram_find_bin_index(&hist_timings, data->gap[i]);
+                    hexstr_push_nibble(&hexstr, p | 8);
+                    hexstr_push_nibble(&hexstr, g);
+                    if (data->gap[i] >= limit) {
+                        ++i;
+                        break;
+                    }
+                }
+                hexstr_push_byte(&hexstr, 0x55);
+                fprintf(stderr, "RfRaw (rx) %s\n", hexstr.p);
+            }
+        }
     }
 
     // Demodulate (if detected)
