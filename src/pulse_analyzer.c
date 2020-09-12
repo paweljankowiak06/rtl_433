@@ -12,6 +12,7 @@
 #include "pulse_analyzer.h"
 #include "pulse_demod.h"
 #include "util.h"
+#include "rfraw.h"
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -349,7 +350,7 @@ void pulse_analyzer(pulse_data_t *data, int package_type)
                 hexstr_push_nibble(&hexstr, g);
             }
             hexstr_push_byte(&hexstr, 0x55);
-            fprintf(stderr, "RfRaw (rx) %s\n", hexstr.p);
+            fprintf(stderr, "view at https://triq.org/pdv/#%s\n", hexstr.p);
         }
         else {
             int limit_bin = MIN(3, hist_gaps.bins_count - 1);
@@ -374,7 +375,11 @@ void pulse_analyzer(pulse_data_t *data, int package_type)
                     }
                 }
                 hexstr_push_byte(&hexstr, 0x55);
-                fprintf(stderr, "RfRaw (rx) %s\n", hexstr.p);
+                fprintf(stderr, "view at https://triq.org/pdv/#%s\n", hexstr.p);
+                //fprintf(stderr, "RfRaw check %d\n", rfraw_check(hexstr.p));
+                //pulse_data_t test = {0};
+                //fprintf(stderr, "RfRaw parse %d\n", rfraw_parse(&test, hexstr.p));
+                //pulse_data_print(&test);
             }
         }
     }

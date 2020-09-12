@@ -39,6 +39,7 @@
 #include "pulse_detect.h"
 #include "pulse_detect_fsk.h"
 #include "pulse_demod.h"
+#include "rfraw.h"
 #include "data.h"
 #include "r_util.h"
 #include "optparse.h"
@@ -1331,10 +1332,20 @@ int main(int argc, char **argv) {
                 }
                 if (cfg->verbosity)
                     fprintf(stderr, "Verifying test data with device %s.\n", r_dev->name);
+                if (rfraw_check(e)) {
+                    pulse_data_t pulse_data = {0};
+                    rfraw_parse(&pulse_data, e);
+                    r += run_ook_demods(&demod->r_devs, &pulse_data); // FIXME: one rdev only
+                } else
                 r += pulse_demod_string(e, r_dev);
                 continue;
             }
             // otherwise test all decoders
+            if (rfraw_check(line)) {
+                pulse_data_t pulse_data = {0};
+                rfraw_parse(&pulse_data, line);
+                r += run_ook_demods(&demod->r_devs, &pulse_data);
+            } else
             for (void **iter = demod->r_devs.elems; iter && *iter; ++iter) {
                 r_device *r_dev = *iter;
                 if (cfg->verbosity)
@@ -1353,6 +1364,11 @@ int main(int argc, char **argv) {
     // Special case for string test data
     if (cfg->test_data) {
         r = 0;
+        if (rfraw_check(cfg->test_data)) {
+            pulse_data_t pulse_data = {0};
+            rfraw_parse(&pulse_data, cfg->test_data);
+            r += run_ook_demods(&demod->r_devs, &pulse_data);
+        } else
         for (void **iter = demod->r_devs.elems; iter && *iter; ++iter) {
             r_device *r_dev = *iter;
             if (cfg->verbosity)
