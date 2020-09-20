@@ -81,7 +81,16 @@ static int bresser_7in1_callback(r_device *decoder, bitbuffer_t *bitbuffer)
         }
         bitrow_printf(msg, sizeof (msg) * 8, "XOR: ");
 
-        int chk      = (msg[0] << 8) | (msg[1]);
+        // LFSR-16 digest, generator 0x8810 key 0xba95 final xor 0x6df1
+        int chk    = (msg[0] << 8) | msg[1];
+        int digest = lfsr_digest16_proper(&msg[2], 23, 0x8810, 0xba95);
+        if ((chk ^ digest) != 0x6df1) {
+            //if (decoder->verbose > 1) {
+            fprintf(stderr, "%s: Digest check failed %04x vs %04x (%04x)\n", __func__, chk, digest, chk ^ digest);
+            //}
+            //return DECODE_FAIL_MIC;
+        }
+
         int id       = (msg[2] << 8) | (msg[3]);
         int wdir     = (msg[4] >> 4) * 100 + (msg[4] & 0x0f) * 10 + (msg[5] >> 4);
         int wgst_raw = (msg[7] >> 4) * 100 + (msg[7] & 0x0f) * 10 + (msg[8] >> 4);
@@ -112,8 +121,18 @@ static int bresser_7in1_callback(r_device *decoder, bitbuffer_t *bitbuffer)
         decoder_output_data(decoder, data);
         return 1;
     }
-
-    int chk      = (msg[0] << 8) | (msg[1]);
+/*
+    // LFSR-16 digest, generator 0x8810 with the next two bytes (ID) as init.
+    int chk    = (msg[0] << 8) | msg[1];
+    int init   = 0xba95; //(msg[2] << 8) | msg[3];
+    int digest = lfsr_digest16_proper(&msg[2], 19, 0x8810, init);
+    if ((chk ^ digest) != 0x6df1) {
+        //if (decoder->verbose > 1) {
+        fprintf(stderr, "%s: Digest check failed %04x vs %04x (%04x)\n", __func__, chk, digest, chk ^ digest);
+        //}
+        return DECODE_FAIL_MIC;
+    }
+*/
     uint32_t id  = ((uint32_t)msg[2] << 24) | (msg[3] << 16) | (msg[4] << 8) | (msg[5]);
     int flags    = (msg[6] >> 4);
     int batt     = (msg[6] >> 3) & 1;

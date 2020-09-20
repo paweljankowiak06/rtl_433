@@ -157,6 +157,7 @@ uint8_t lfsr_digest8_reflect(uint8_t const message[], int bytes, uint8_t gen, ui
 /// @param key initial key
 /// @return digest value
 uint16_t lfsr_digest16(uint32_t data, int bits, uint16_t gen, uint16_t key);
+uint16_t lfsr_digest16_proper(uint8_t const message[], unsigned bytes, uint16_t gen, uint16_t key);
 
 /// Compute bit parity of a single byte (8 bits).
 ///
