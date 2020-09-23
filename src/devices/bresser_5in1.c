@@ -20,9 +20,12 @@ Observed length depends on reset_limit.
 
 Indoor sensor:
 
-    {240}6ab0197005fd29000000000022965700003c000007000000000000000000
+    {240}6ab0 197005fd2900000000002296570000 3c 000007000000000000000000
 
-    CHK:8h8h ID?8h8h8h8h FLAGS:4h BATT:1b CH:3d 8h 8h8h 8h8h TEMP:12h 4h HUM:8h 8h8h CHK?8h 8h 8h8h TRAILER?8h8h 8h8h 8h8h 8h8h 8h
+    DIGEST:8h8h ID?8h8h8h8h FLAGS:4h BATT:1b CH:3d 8h 8h8h 8h8h TEMP:12h 4b HUM:8h 8h8h CHK:8h TRAILER?8h8h 8h8h 8h8h 8h8h 8h8h 8h8h
+
+Digest is LFSR-16 gen 0x8810 key 0x5412, excluding the add-checksum and trailer.
+Checksum is 8-bit add (with carry) to 0xff.
 
 Outdoor sensor:
 
@@ -33,7 +36,7 @@ Outdoor sensor:
     CHK:8h8h ID?8h8h WDIR:8h4h° 4h 8h WGUST:8h.4h WAVG:8h.4h RAIN?8h8h RAIN?8h8h TEMP:8h.4hC 4h HUM:8h% LIGHT:8h4h,4hKL ?:8h8h4h TRAILER:8h8h8h4h
     Unit of light is kLux (not W/m²).
 
-First two bytes are likely an LFSR-16 digest, generator 0x8810 with some unknown/variable key?
+First two bytes are an LFSR-16 digest, generator 0x8810 with some unknown/variable key?
 */
 
 #include "decoder.h"
@@ -44,7 +47,7 @@ static int bresser_7in1_callback(r_device *decoder, bitbuffer_t *bitbuffer)
     uint8_t const whiten_pattern[] = {0xaa, 0xaa, 0x00, 0x00};
 
     data_t *data;
-    //uint8_t msg[21];
+    //uint8_t msg[18];
     uint8_t msg[25];
 
     bitbuffer_print(bitbuffer);
@@ -114,25 +117,33 @@ static int bresser_7in1_callback(r_device *decoder, bitbuffer_t *bitbuffer)
                 "wind_avg_m_s",     "Wind Speed",   DATA_FORMAT, "%.1f m/s", DATA_DOUBLE, wavg_raw * 0.1f,
                 "wind_dir_deg",     "Direction",    DATA_FORMAT, "%d °",     DATA_INT,    wdir,
                 "light_klx",        "Light",        DATA_FORMAT, "%.1f klx", DATA_DOUBLE, light_klx,
-                //"mic",              "Integrity",    DATA_STRING, "CRC",
+                "mic",              "Integrity",    DATA_STRING, "CRC",
                 NULL);
         /* clang-format on */
 
         decoder_output_data(decoder, data);
         return 1;
     }
-/*
-    // LFSR-16 digest, generator 0x8810 with the next two bytes (ID) as init.
-    int chk    = (msg[0] << 8) | msg[1];
-    int init   = 0xba95; //(msg[2] << 8) | msg[3];
-    int digest = lfsr_digest16_proper(&msg[2], 19, 0x8810, init);
-    if ((chk ^ digest) != 0x6df1) {
+
+    // LFSR-16 digest, generator 0x8810 init 0x5412
+    int chkdgst = (msg[0] << 8) | msg[1];
+    int digest = lfsr_digest16_proper(&msg[2], 15, 0x8810, 0x5412);
+    if (chkdgst != digest) {
         //if (decoder->verbose > 1) {
-        fprintf(stderr, "%s: Digest check failed %04x vs %04x (%04x)\n", __func__, chk, digest, chk ^ digest);
+        fprintf(stderr, "%s: Digest check failed %04x vs %04x\n", __func__, chkdgst, digest);
         //}
         return DECODE_FAIL_MIC;
     }
-*/
+    // Checksum add (with carry)
+    int chksum = msg[17];
+    int sum = add_bytes(&msg[2], 16);
+    if ((sum & 0xff) != 0xff) {
+        //if (decoder->verbose > 1) {
+        fprintf(stderr, "%s: Checksum failed %04x vs %04x\n", __func__, chksum, sum);
+        //}
+        return DECODE_FAIL_MIC;
+    }
+
     uint32_t id  = ((uint32_t)msg[2] << 24) | (msg[3] << 16) | (msg[4] << 8) | (msg[5]);
     int flags    = (msg[6] >> 4);
     int batt     = (msg[6] >> 3) & 1;
@@ -152,7 +163,7 @@ static int bresser_7in1_callback(r_device *decoder, bitbuffer_t *bitbuffer)
             "temperature_C",    "Temperature",  DATA_FORMAT, "%.1f C", DATA_DOUBLE, temp_c,
             "humidity",         "Humidity",     DATA_INT,    humidity,
             "flags",            "Flags",        DATA_INT,    flags,
-            //"mic",              "Integrity",    DATA_STRING, "CRC",
+            "mic",              "Integrity",    DATA_STRING, "CRC",
             NULL);
     /* clang-format on */
 
