@@ -77,13 +77,6 @@ static int auriol_afw2a1_decode(r_device *decoder, bitbuffer_t *bitbuffer)
     channel     = (b[1] & 0x30) >> 4;
     temp_raw    = ((b[1] & 0x0f) << 12) | (b[2] << 4); // use sign extend
     temp_c      = (temp_raw >> 4) * 0.1f;
-    // 0xa is fixed. If it differs, it is a wrong device. Could anyone confirm that?
-    if ((b[3] >> 4) != 0xa) {
-        if (decoder->verbose) {
-            fprintf(stderr, "Not an Auriol-AFW2A1 device\n");
-        }
-        return DECODE_FAIL_SANITY;
-    }
     humidity = (((b[3] & 0x0f) << 4) | (b[4] >> 4));
 
     if ((humidity > 0x64) || (humidity < 0x00) || (temp_c < -51.1) || (temp_c > 76.7)) {
